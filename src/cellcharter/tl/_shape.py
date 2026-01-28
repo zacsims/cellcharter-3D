@@ -416,7 +416,9 @@ def _process_component_3d(
 
         try:
             hull = ConvexHull(points)
-            mesh = trimesh.Trimesh(vertices=points[hull.vertices], faces=hull.simplices)
+            # Use all points as vertices and hull.simplices as faces
+            # (simplices index into the original points array)
+            mesh = trimesh.Trimesh(vertices=points, faces=hull.simplices)
             return component, Mesh3D.from_trimesh(mesh)
         except Exception as e:
             warnings.warn(f"Convex hull computation failed for component {component}: {e}", stacklevel=2)
@@ -426,12 +428,13 @@ def _process_component_3d(
         try:
             return component, _alpha_shape_3d(points, alpha=alpha)
         except Exception as e:
-            warnings.warn(f"Alpha shape computation failed for component {component}: {e}", stacklevel=2)
+            warnings.warn(f"Alpha shape computation failed for component {component}: {e}. Falling back to convex hull.", stacklevel=2)
             # Fall back to convex hull
             try:
                 from scipy.spatial import ConvexHull
 
                 hull = ConvexHull(points)
+                # Use all points as vertices and hull.simplices as faces
                 mesh = trimesh.Trimesh(vertices=points, faces=hull.simplices)
                 return component, Mesh3D.from_trimesh(mesh)
             except Exception:

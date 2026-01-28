@@ -9,6 +9,77 @@ import cellcharter as cc
 from cellcharter.tl._shape import Mesh3D, _detect_ndim, _elongation_3d
 
 
+# ============================================================================
+# Helper functions (must be defined before test classes that use them)
+# ============================================================================
+
+
+def _has_3d_deps() -> bool:
+    """Check if 3D dependencies are available."""
+    try:
+        import alphashape  # noqa: F401
+        import trimesh  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _create_sphere_adata(n_cells: int) -> AnnData:
+    """Create AnnData with spherical 3D cluster."""
+    import squidpy as sq
+
+    # Generate points in a sphere
+    np.random.seed(42)
+    theta = np.random.uniform(0, 2 * np.pi, n_cells)
+    phi = np.random.uniform(0, np.pi, n_cells)
+    r = np.random.uniform(0, 1, n_cells) ** (1/3)  # Uniform within sphere
+
+    points = np.column_stack([
+        r * np.sin(phi) * np.cos(theta),
+        r * np.sin(phi) * np.sin(theta),
+        r * np.cos(phi)
+    ]) * 10  # Scale up
+
+    adata = AnnData(X=np.random.rand(n_cells, 10))
+    adata.obsm["spatial"] = points
+    adata.obs["cluster"] = pd.Categorical(["cluster_0"] * n_cells)
+
+    # Build spatial graph
+    sq.gr.spatial_neighbors(adata, coord_type="generic", n_neighs=15)
+
+    return adata
+
+
+def _create_elongated_cluster_adata() -> AnnData:
+    """Create AnnData with elongated 3D cluster."""
+    import squidpy as sq
+
+    np.random.seed(42)
+    n_cells = 200
+
+    # Generate points along a tube
+    t = np.linspace(0, 10, n_cells)
+    points = np.column_stack([
+        t,
+        np.random.normal(0, 0.5, n_cells),
+        np.random.normal(0, 0.5, n_cells)
+    ])
+
+    adata = AnnData(X=np.random.rand(n_cells, 10))
+    adata.obsm["spatial"] = points
+    adata.obs["cluster"] = pd.Categorical(["cluster_0"] * n_cells)
+
+    # Build spatial graph
+    sq.gr.spatial_neighbors(adata, coord_type="generic", n_neighs=15)
+
+    return adata
+
+
+# ============================================================================
+# Test classes
+# ============================================================================
+
+
 class TestDimensionDetection:
     """Tests for dimension detection utility."""
 
@@ -90,18 +161,18 @@ class TestElongation3D:
     """Tests for 3D elongation metric."""
 
     def test_sphere_low_elongation(self):
-        """Test that a sphere has low elongation."""
-        # Generate points on a sphere
+        """Test that a spherical point cloud has low elongation."""
+        # Generate points INSIDE a sphere (uniform distribution)
+        np.random.seed(42)
         n_points = 1000
-        theta = np.random.uniform(0, 2 * np.pi, n_points)
-        phi = np.random.uniform(0, np.pi, n_points)
-        r = 1.0
 
-        points = np.column_stack([
-            r * np.sin(phi) * np.cos(theta),
-            r * np.sin(phi) * np.sin(theta),
-            r * np.cos(phi)
-        ])
+        # Uniform points in a sphere using rejection sampling
+        points = []
+        while len(points) < n_points:
+            p = np.random.uniform(-1, 1, 3)
+            if np.linalg.norm(p) <= 1:
+                points.append(p)
+        points = np.array(points)
 
         elongation = _elongation_3d(points)
         # Sphere should have low elongation (close to 0)
@@ -121,8 +192,9 @@ class TestElongation3D:
         # Line should have high elongation (close to 1)
         assert elongation > 0.9
 
-    def test_disk_medium_elongation(self):
-        """Test that a flat disk has medium elongation."""
+    def test_disk_high_elongation(self):
+        """Test that a flat disk has high elongation (one dimension is nearly zero)."""
+        np.random.seed(42)
         # Generate points on a flat disk (2D circle embedded in 3D)
         n_points = 500
         theta = np.random.uniform(0, 2 * np.pi, n_points)
@@ -135,8 +207,8 @@ class TestElongation3D:
         ])
 
         elongation = _elongation_3d(points)
-        # Disk should have medium elongation
-        assert 0.3 < elongation < 0.9
+        # Flat disk should have high elongation because z dimension is tiny
+        assert elongation > 0.9
 
 
 class TestConstruct3DCoordinates:
@@ -281,66 +353,3 @@ class TestShapeMetrics3D:
 
         purity = adata.uns["shape_component"]["purity"]
         assert len(purity) > 0
-
-
-# Helper functions
-
-def _has_3d_deps() -> bool:
-    """Check if 3D dependencies are available."""
-    try:
-        import alphashape  # noqa: F401
-        import trimesh  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
-def _create_sphere_adata(n_cells: int) -> AnnData:
-    """Create AnnData with spherical 3D cluster."""
-    import squidpy as sq
-
-    # Generate points in a sphere
-    np.random.seed(42)
-    theta = np.random.uniform(0, 2 * np.pi, n_cells)
-    phi = np.random.uniform(0, np.pi, n_cells)
-    r = np.random.uniform(0, 1, n_cells) ** (1/3)  # Uniform within sphere
-
-    points = np.column_stack([
-        r * np.sin(phi) * np.cos(theta),
-        r * np.sin(phi) * np.sin(theta),
-        r * np.cos(phi)
-    ]) * 10  # Scale up
-
-    adata = AnnData(X=np.random.rand(n_cells, 10))
-    adata.obsm["spatial"] = points
-    adata.obs["cluster"] = pd.Categorical(["cluster_0"] * n_cells)
-
-    # Build spatial graph
-    sq.gr.spatial_neighbors(adata, coord_type="generic", n_neighs=15)
-
-    return adata
-
-
-def _create_elongated_cluster_adata() -> AnnData:
-    """Create AnnData with elongated 3D cluster."""
-    import squidpy as sq
-
-    np.random.seed(42)
-    n_cells = 200
-
-    # Generate points along a tube
-    t = np.linspace(0, 10, n_cells)
-    points = np.column_stack([
-        t,
-        np.random.normal(0, 0.5, n_cells),
-        np.random.normal(0, 0.5, n_cells)
-    ])
-
-    adata = AnnData(X=np.random.rand(n_cells, 10))
-    adata.obsm["spatial"] = points
-    adata.obs["cluster"] = pd.Categorical(["cluster_0"] * n_cells)
-
-    # Build spatial graph
-    sq.gr.spatial_neighbors(adata, coord_type="generic", n_neighs=15)
-
-    return adata
